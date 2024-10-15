@@ -10,7 +10,7 @@ uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
 if uploaded_file is not None:
     # Load the uploaded data
     data = pd.read_csv(uploaded_file)
-    st.error("Data Preview")
+    st.info("Data Preview")
     st.dataframe(data)
     
     # Descriptive Statistics
@@ -61,6 +61,43 @@ if uploaded_file is not None:
     holiday_sales = data.groupby('Is Holiday')['Total Sales ($)'].sum().reset_index()
     st.dataframe(holiday_sales)
     
+    # Correlation Analysis for Important Factors
+    st.success("Analysis for Important Factors Influencing Sales")
+
+    # Prepare data for correlation analysis
+    data['Day of Week'] = data['Date'].dt.dayofweek  # Monday = 0, Sunday = 6
+    data['Week'] = data['Date'].dt.isocalendar().week  # Week number
+    data['Is Weekend'] = data['Day of Week'].apply(lambda x: 1 if x >= 5 else 0)  # 1 if weekend, 0 if weekday
+
+    # Encode categorical variables (like Weather Condition and Holiday)
+    data['Weather Condition Encoded'] = pd.factorize(data['Weather Condition'])[0]
+    data['Is Holiday Encoded'] = data['Is Holiday'].apply(lambda x: 1 if x == 'Yes' else 0)
+
+    # Select relevant features and target variable
+    features = ['Day of Week', 'Week', 'Is Weekend', 'Weather Condition Encoded', 'Is Holiday Encoded', 'Discount (%)', 'Total Sales ($)']
+    correlation_matrix = data[features].corr()  # Calculate the correlation matrix
+
+    # Extract the correlation of each feature with 'Total Sales ($)'
+    sales_correlation = correlation_matrix[['Total Sales ($)']].sort_values(by='Total Sales ($)', ascending=False)
+
+    # Combine the explanation in one text block
+    explanation = ""
+
+    for feature in sales_correlation.index:
+        if feature != 'Total Sales ($)':  # Exclude Total Sales itself
+            correlation_value = sales_correlation.loc[feature, 'Total Sales ($)']
+            if correlation_value > 0:
+                explanation += (f"- **{feature}** has a **positive** correlation of {correlation_value:.2f} with total sales. "
+                                f"This means that as {feature} increases, total sales tend to increase. Leverage this factor to boost sales.\n")
+            elif correlation_value < 0:
+                explanation += (f"- **{feature}** has a **negative** correlation of {correlation_value:.2f} with total sales. "
+                                f"As {feature} increases, total sales tend to decrease. Consider strategies to mitigate this factor's negative impact.\n")
+            else:
+                explanation += (f"- **{feature}** has a **neutral** correlation with total sales, meaning it has little to no effect on sales.\n")
+
+    # Display the combined explanation
+    st.markdown(explanation)
+
     # Stock Management and Inventory Turnover Analysis
     st.success("Top 5 Products by Stock After Sale")
     stock_data = data.groupby('Product Name')['Stock After Sale'].mean().reset_index()
