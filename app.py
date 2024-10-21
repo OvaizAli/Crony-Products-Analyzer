@@ -116,25 +116,31 @@ if uploaded_file is not None:
     # Align the new data with the trained model's features
     new_data = new_data.reindex(columns=loaded_feature_names, fill_value=0)
 
-    # Make predictions
-    predictions = loaded_model.predict(new_data)
+    # Handle missing values to avoid prediction errors
+    new_data.fillna(0, inplace=True)
 
-    # Add predictions to the original data
-    data['Predicted Next Week Sales'] = predictions
+    try:
+        # Make predictions
+        predictions = loaded_model.predict(new_data)
 
-    # Calculate the previous average sales for each product (based on historical sales columns like 'Future_7_Day_Sales')
-    data['Current Avg Sales'] = data.groupby('Product Name')['Future_7_Day_Sales'].transform('mean')
+        # Add predictions to the original data
+        data['Predicted Next Week Sales'] = predictions
 
-    # Group the data by product and calculate the average predicted sales and previous average sales
-    grouped_data = data.groupby('Product Name', as_index=False).agg({
-        'Current Avg Sales': 'mean',  # Historical average sales
-        'Predicted Next Week Sales': 'mean'  # Predicted future sales
-    })
+        # Calculate the previous average sales for each product (based on historical sales columns like 'Future_7_Day_Sales')
+        data['Current Avg Sales'] = data.groupby('Product Name')['Future_7_Day_Sales'].transform('mean')
 
-    # Round the sales values to whole numbers
-    grouped_data['Current Avg Sales'] = grouped_data['Current Avg Sales'].round()
-    grouped_data['Predicted Next Week Sales'] = grouped_data['Predicted Next Week Sales'].round()
+        # Group the data by product and calculate the average predicted sales and previous average sales
+        grouped_data = data.groupby('Product Name', as_index=False).agg({
+            'Current Avg Sales': 'mean',  # Historical average sales
+            'Predicted Next Week Sales': 'mean'  # Predicted future sales
+        })
 
-    # Display the comparison of previous average sales vs predicted sales
-    st.success("Comparison of Current Average Sales and Predicted Sales for All Products Next Week")
-    st.dataframe(grouped_data)
+        # Round the sales values to whole numbers
+        grouped_data['Current Avg Sales'] = grouped_data['Current Avg Sales'].round()
+        grouped_data['Predicted Next Week Sales'] = grouped_data['Predicted Next Week Sales'].round()
+
+        # Display the comparison of previous average sales vs predicted sales
+        st.success("Comparison of Current Average Sales and Predicted Sales for All Products Next Week")
+        st.dataframe(grouped_data)
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {e}")
