@@ -131,6 +131,10 @@ if uploaded_file is not None:
         'Predicted Next Week Sales': 'mean'  # Predicted future sales
     })
 
+    # Round the sales values to whole numbers
+    grouped_data['Current Avg Sales'] = grouped_data['Current Avg Sales'].round()
+    grouped_data['Predicted Next Week Sales'] = grouped_data['Predicted Next Week Sales'].round()
+
     # Display the comparison of previous average sales vs predicted sales
     st.success("Comparison of Current Average Sales and Predicted Sales for All Products Next Week")
     st.dataframe(grouped_data)
