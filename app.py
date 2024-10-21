@@ -1,5 +1,10 @@
 import streamlit as st
 import pandas as pd
+import joblib
+
+# Load the trained model and feature names
+loaded_model = joblib.load('final_model.joblib')
+loaded_feature_names = joblib.load('feature_names.joblib')
 
 # Title of the application
 st.title("Crony Products Analyzer")
@@ -18,23 +23,20 @@ if uploaded_file is not None:
     st.dataframe(data.describe())
     
     # Trend Analysis
-
-    # Ensure 'Date' column is in datetime format
     data['Date'] = pd.to_datetime(data['Date'])
 
     # Day of Week Analysis
     st.success("Total Sales by Day of the Week")
-    data['Day of Week'] = data['Date'].dt.day_name()  # Extract day of the week
+    data['Day of Week'] = data['Date'].dt.day_name()
     sales_by_day_of_week = data.groupby('Day of Week')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
     st.dataframe(sales_by_day_of_week[['Day of Week', 'Total Sales ($)']])
 
     # Weekly Analysis
     st.success("Total Sales by Week")
-    data['Week'] = data['Date'].dt.isocalendar().week  # Extract week number
+    data['Week'] = data['Date'].dt.isocalendar().week
     sales_by_week = data.groupby('Week')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
     st.dataframe(sales_by_week[['Week', 'Total Sales ($)']])
 
-    
     # Sales Performance by Category/Product
     st.success("Total Sales by Product Category")
     category_sales = data.groupby('Category')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
@@ -47,7 +49,7 @@ if uploaded_file is not None:
     
     # Profitability Analysis
     st.success("Profitability Analysis")
-    data['Profit Margin'] = data['Net Sales Value ($)'] / data['Total Sales ($)']  # Corrected profit margin formula
+    data['Profit Margin'] = data['Net Sales Value ($)'] / data['Total Sales ($)']
     profit_analysis = data.groupby('Product Name')['Profit Margin'].mean().reset_index()
     profit_analysis = profit_analysis.sort_values(by='Profit Margin', ascending=False).head(5)
     st.dataframe(profit_analysis)
@@ -64,38 +66,28 @@ if uploaded_file is not None:
     # Correlation Analysis for Important Factors
     st.success("Analysis for Important Factors Influencing Sales")
 
-    # Prepare data for correlation analysis
-    data['Day of Week'] = data['Date'].dt.dayofweek  # Monday = 0, Sunday = 6
-    data['Week'] = data['Date'].dt.isocalendar().week  # Week number
-    data['Is Weekend'] = data['Day of Week'].apply(lambda x: 1 if x >= 5 else 0)  # 1 if weekend, 0 if weekday
+    data['Day of Week'] = data['Date'].dt.dayofweek
+    data['Week'] = data['Date'].dt.isocalendar().week
+    data['Is Weekend'] = data['Day of Week'].apply(lambda x: 1 if x >= 5 else 0)
 
-    # Encode categorical variables (like Weather Condition and Holiday)
     data['Weather Condition Encoded'] = pd.factorize(data['Weather Condition'])[0]
     data['Is Holiday Encoded'] = data['Is Holiday'].apply(lambda x: 1 if x == 'Yes' else 0)
 
-    # Select relevant features and target variable
     features = ['Day of Week', 'Week', 'Is Weekend', 'Weather Condition Encoded', 'Is Holiday Encoded', 'Discount (%)', 'Total Sales ($)']
-    correlation_matrix = data[features].corr()  # Calculate the correlation matrix
-
-    # Extract the correlation of each feature with 'Total Sales ($)'
+    correlation_matrix = data[features].corr()
     sales_correlation = correlation_matrix[['Total Sales ($)']].sort_values(by='Total Sales ($)', ascending=False)
 
-    # Combine the explanation in one text block
     explanation = ""
-
     for feature in sales_correlation.index:
-        if feature != 'Total Sales ($)':  # Exclude Total Sales itself
+        if feature != 'Total Sales ($)':
             correlation_value = sales_correlation.loc[feature, 'Total Sales ($)']
             if correlation_value > 0:
-                explanation += (f"- **{feature}** has a **positive** correlation of {correlation_value:.2f} with total sales. "
-                                f"This means that as {feature} increases, total sales tend to increase. Leverage this factor to boost sales.\n")
+                explanation += (f"- **{feature}** has a **positive** correlation of {correlation_value:.2f} with total sales.\n")
             elif correlation_value < 0:
-                explanation += (f"- **{feature}** has a **negative** correlation of {correlation_value:.2f} with total sales. "
-                                f"As {feature} increases, total sales tend to decrease. Consider strategies to mitigate this factor's negative impact.\n")
+                explanation += (f"- **{feature}** has a **negative** correlation of {correlation_value:.2f} with total sales.\n")
             else:
-                explanation += (f"- **{feature}** has a **neutral** correlation with total sales, meaning it has little to no effect on sales.\n")
+                explanation += (f"- **{feature}** has a **neutral** correlation with total sales.\n")
 
-    # Display the combined explanation
     st.markdown(explanation)
 
     # Stock Management and Inventory Turnover Analysis
@@ -106,8 +98,39 @@ if uploaded_file is not None:
     
     inventory_turnover = (data['Total Sales ($)'] / data['Stock After Sale']).mean()
     st.success(f"Inventory Turnover Rate (Total Sales / Average Stock After Sale) = {inventory_turnover:.2f}")
-    
+
     # Discount and Promotion Impact
     st.success("Sales with and without Discounts")
     discount_sales = data.groupby('Discount (%)')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)')
     st.dataframe(discount_sales)
+
+    # Prediction Section for all data
+    st.header("Predicted Sales for Next Week vs. Current Average Sales")
+
+    # Prepare the input data for prediction
+    new_data = data.copy()
+
+    # One-hot encoding for categorical features
+    new_data = pd.get_dummies(new_data, columns=['Weather Condition', 'Season', 'Category', 'Product Name'], drop_first=True)
+
+    # Align the new data with the trained model's features
+    new_data = new_data.reindex(columns=loaded_feature_names, fill_value=0)
+
+    # Make predictions
+    predictions = loaded_model.predict(new_data)
+
+    # Add predictions to the original data
+    data['Predicted Next Week Sales'] = predictions
+
+    # Calculate the previous average sales for each product (based on historical sales columns like 'Future_7_Day_Sales')
+    data['Current Avg Sales'] = data.groupby('Product Name')['Future_7_Day_Sales'].transform('mean')
+
+    # Group the data by product and calculate the average predicted sales and previous average sales
+    grouped_data = data.groupby('Product Name', as_index=False).agg({
+        'Current Avg Sales': 'mean',  # Historical average sales
+        'Predicted Next Week Sales': 'mean'  # Predicted future sales
+    })
+
+    # Display the comparison of previous average sales vs predicted sales
+    st.success("Comparison of Current Average Sales and Predicted Sales for All Products Next Week")
+    st.dataframe(grouped_data)
