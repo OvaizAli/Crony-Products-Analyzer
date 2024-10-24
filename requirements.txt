@@ -3,3 +3,5 @@ scipy
 streamlit
 joblib
 hyperopt
+lightgbm
+xgboost
