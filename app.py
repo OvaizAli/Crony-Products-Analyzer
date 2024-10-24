@@ -2,8 +2,10 @@ import streamlit as st
 import pandas as pd
 import joblib
 
-# Load the trained model and feature names
-loaded_model = joblib.load('final_model.joblib')
+# Load the models and feature names
+loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
+loaded_model_monthly = joblib.load('final_model_monthly_sales.joblib')
+loaded_model_discount = joblib.load('final_model_discount_percentage.joblib')
 loaded_feature_names = joblib.load('feature_names.joblib')
 
 # Title of the application
@@ -105,7 +107,7 @@ if uploaded_file is not None:
     st.dataframe(discount_sales)
 
     # Prediction Section for all data
-    st.header("Predicted Sales for Next Week vs. Current Average Sales")
+    st.header("Predicted Weekly, Monthly Sales, and Discount Percentage")
 
     # Prepare the input data for prediction
     new_data = data.copy()
@@ -113,34 +115,69 @@ if uploaded_file is not None:
     # One-hot encoding for categorical features
     new_data = pd.get_dummies(new_data, columns=['Weather Condition', 'Season', 'Category', 'Product Name'], drop_first=True)
 
-    # Align the new data with the trained model's features
-    new_data = new_data.reindex(columns=loaded_feature_names, fill_value=0)
-
     # Handle missing values to avoid prediction errors
     new_data.fillna(0, inplace=True)
 
+    # Convert 'Month' column to numeric if necessary
+    if 'Month' in new_data.columns:
+        try:
+            new_data['Month'] = pd.to_datetime(new_data['Month']).dt.month
+        except Exception as e:
+            st.error(f"Error converting 'Month' to numeric: {e}")
+
     try:
-        # Make predictions
-        predictions = loaded_model.predict(new_data)
+        # Ensure that new_data has the same columns as the trained models
+        features_week = new_data.reindex(columns=loaded_feature_names['weekly'], fill_value=0)
+        features_month = new_data.reindex(columns=loaded_feature_names['monthly'], fill_value=0)
+        features_discount = new_data.reindex(columns=loaded_feature_names['discount'], fill_value=0)
 
-        # Add predictions to the original data
-        data['Predicted Next Week Sales'] = predictions
+        # Check for non-numeric data in the feature sets
+        if not features_week.select_dtypes(include=['object']).empty:
+            st.error(f"Non-numeric data found in weekly features: {features_week.select_dtypes(include=['object']).columns.tolist()}")
+        if not features_month.select_dtypes(include=['object']).empty:
+            st.error(f"Non-numeric data found in monthly features: {features_month.select_dtypes(include=['object']).columns.tolist()}")
+        if not features_discount.select_dtypes(include=['object']).empty:
+            st.error(f"Non-numeric data found in discount features: {features_discount.select_dtypes(include=['object']).columns.tolist()}")
 
-        # Calculate the previous average sales for each product (based on historical sales columns like 'Future_7_Day_Sales')
-        data['Current Avg Sales'] = data.groupby('Product Name')['Future_7_Day_Sales'].transform('mean')
+        # Make sure all features are numeric before predictions
+        if features_week.select_dtypes(include=['object']).empty and features_month.select_dtypes(include=['object']).empty and features_discount.select_dtypes(include=['object']).empty:
+            # Make predictions
+            predictions_weekly = loaded_model_weekly.predict(features_week)
+            predictions_monthly = loaded_model_monthly.predict(features_month)
+            predictions_discount = loaded_model_discount.predict(features_discount)
 
-        # Group the data by product and calculate the average predicted sales and previous average sales
-        grouped_data = data.groupby('Product Name', as_index=False).agg({
-            'Current Avg Sales': 'mean',  # Historical average sales
-            'Predicted Next Week Sales': 'mean'  # Predicted future sales
-        })
+            # Add predictions to the original data
+            data['Next Week Sales'] = predictions_weekly
+            data['Next Month Sales'] = predictions_monthly
+            data['Predicted Discount (%)'] = predictions_discount
 
-        # Round the sales values to whole numbers
-        grouped_data['Current Avg Sales'] = grouped_data['Current Avg Sales'].round()
-        grouped_data['Predicted Next Week Sales'] = grouped_data['Predicted Next Week Sales'].round()
+            # Calculate the previous average sales for each product
+            data['Current Avg Weekly Sales'] = data.groupby('Product Name')['Future_7_Day_Sales'].transform('mean')
+            data['Current Avg Monthly Sales'] = data.groupby('Product Name')['Monthly Sales'].transform('mean')
+            data['Current Avg Discount (%)'] = data.groupby('Product Name')['Discount (%)'].transform('mean')
 
-        # Display the comparison of previous average sales vs predicted sales
-        st.success("Comparison of Current Average Sales and Predicted Sales for All Products Next Week")
-        st.dataframe(grouped_data)
+            # Group the data by product and calculate the average predicted sales and previous average sales
+            grouped_data = data.groupby('Product Name', as_index=False).agg({
+                'Current Avg Weekly Sales': 'mean',
+                'Next Week Sales': 'mean',
+                'Current Avg Monthly Sales': 'mean',
+                'Next Month Sales': 'mean',
+                'Current Avg Discount (%)': 'mean',
+                'Predicted Discount (%)': 'mean'
+            })
+
+            # Round the sales values to whole numbers
+            grouped_data['Current Avg Weekly Sales'] = grouped_data['Current Avg Weekly Sales'].round()
+            grouped_data['Current Avg Monthly Sales'] = grouped_data['Current Avg Monthly Sales'].round()
+            grouped_data['Current Avg Discount (%)'] = grouped_data['Current Avg Discount (%)'].round()
+            grouped_data['Next Week Sales'] = grouped_data['Next Week Sales'].round()
+            grouped_data['Next Month Sales'] = grouped_data['Next Month Sales'].round()
+            grouped_data['Predicted Discount (%)'] = grouped_data['Predicted Discount (%)'].round()
+
+            # Display the comparison of previous average sales vs predicted sales
+            st.success("Comparison of Current Average Weekly and Monthly Sales with Predicted Sales and Discount (%)")
+            st.dataframe(grouped_data)
+        else:
+            st.error("Error: Non-numeric data found in features. Check the output for details.")
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
