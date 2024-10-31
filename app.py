@@ -122,26 +122,44 @@ if uploaded_file is not None:
     rules = association_rules(frequent_items, metric="lift", min_threshold=1)
 
     # Display only rules with two or more items in the antecedents or consequents
-    filtered_rules = rules[(rules['antecedents'].apply(len) >= 1) | (rules['consequents'].apply(len) >= 1)]
+    filtered_rules = rules[(rules['antecedents'].apply(len) > 1) | (rules['consequents'].apply(len) > 1)]
 
-   # Display results in Streamlit
+    # Display results in Streamlit
     st.success("Products Often Bought Together")
 
     # Check if there are no rules and display an appropriate message
     if filtered_rules.empty:
         st.warning("We couldn't find any products that are frequently bought together.")
     else:
+        # Convert frozenset to a string of product names for better readability
+        filtered_rules['Items Purchased Together'] = filtered_rules['antecedents'].apply(lambda x: ', '.join(x))
+        filtered_rules['Suggested Products'] = filtered_rules['consequents'].apply(lambda x: ', '.join(x))
+    
+        # Ensure we only select the relevant columns for renaming
+        filtered_rules = filtered_rules[['Items Purchased Together', 'Suggested Products', 'support', 'lift', 'confidence']]
+        
         # Rename columns for better understanding
         filtered_rules.columns = [
-            'Items Purchased Together',  # Represents the products that were bought together
-            'Suggested Products',         # Represents products recommended based on past purchases
-            'Popularity (%)',             # Indicates how often this product combination was bought
-            'Likelihood (%)',             # The chance of buying the suggested products if the items purchased together are bought
-            'Strength of Association'     # A measure of how closely related the products are in terms of purchasing
+            'Items Purchased Together',      # Represents the products that were bought together
+            'Suggested Products',             # Represents products recommended based on past purchases
+            'Purchase Frequency',             # Support indicates how frequently this product combination was purchased
+            'Association Strength',           # Indicates the strength of the association between the products based on purchasing patterns
+            'Likelihood (%)'                  # The likelihood of purchasing the suggested products given that the items purchased together are bought
         ]
-        
-        # Display the filtered rules
-        st.dataframe(filtered_rules[['Items Purchased Together', 'Suggested Products', 'Popularity (%)', 'Likelihood (%)', 'Strength of Association']])
+
+        # Calculate 'Purchase Frequency (%)' if not directly available
+        total_transactions = data['Transaction ID'].nunique()
+        filtered_rules['Purchase Frequency (%)'] = (filtered_rules['Purchase Frequency'] * 100).round(2)
+
+        # Calculate 'Likelihood (%)' based on confidence
+        filtered_rules['Likelihood (%)'] = (filtered_rules['Likelihood (%)'] * 100).round(2)
+
+        # Sort the filtered rules by Association Strength and get the top N
+        top_n = 10  # You can change this number to get more or fewer results
+        top_filtered_rules = filtered_rules.nlargest(top_n, 'Association Strength')  # Sort by 'Strength of Association' or another column
+
+        # Display the top filtered rules
+        st.dataframe(top_filtered_rules[['Items Purchased Together', 'Suggested Products', 'Purchase Frequency (%)', 'Likelihood (%)', 'Association Strength']].sort_values(by='Association Strength', ascending=False))
 
     # Calculate Weekly and Monthly Growth as percentages
     data['Weekly Growth (%)'] = data['Total Sales ($)'].pct_change(periods=7) 
