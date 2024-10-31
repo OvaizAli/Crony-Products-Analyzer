@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
+from mlxtend.frequent_patterns import apriori, association_rules
 
 # Load the models and feature names
 loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
@@ -40,22 +41,22 @@ if uploaded_file is not None:
     sales_by_week = data.groupby('Week')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
     st.dataframe(sales_by_week[['Week', 'Total Sales ($)']])
 
-    # Sales Performance by Category/Product
-    st.success("Total Sales by Product Category")
-    category_sales = data.groupby('Category')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
-    st.dataframe(category_sales[['Category', 'Total Sales ($)']])
+    # # Sales Performance by Category/Product
+    # st.success("Total Sales by Product Category")
+    # category_sales = data.groupby('Category')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
+    # st.dataframe(category_sales[['Category', 'Total Sales ($)']])
     
-    st.success("Top 5 Products by Sales")
-    product_sales = data.groupby('Product Name')['Total Sales ($)'].sum().reset_index()
-    top_products = product_sales.sort_values(by='Total Sales ($)', ascending=False).head(5)
-    st.dataframe(top_products)
+    # st.success("Top 5 Products by Sales")
+    # product_sales = data.groupby('Product Name')['Total Sales ($)'].sum().reset_index()
+    # top_products = product_sales.sort_values(by='Total Sales ($)', ascending=False).head(5)
+    # st.dataframe(top_products)
     
-    # Profitability Analysis
-    st.success("Profitability Analysis")
+    # # Profitability Analysis
+    # st.success("Profitability Analysis")
     data['Profit Margin'] = data['Net Sales Value ($)'] / data['Total Sales ($)']
-    profit_analysis = data.groupby('Product Name')['Profit Margin'].mean().reset_index()
-    profit_analysis = profit_analysis.sort_values(by='Profit Margin', ascending=False).head(5)
-    st.dataframe(profit_analysis)
+    # profit_analysis = data.groupby('Product Name')['Profit Margin'].mean().reset_index()
+    # profit_analysis = profit_analysis.sort_values(by='Profit Margin', ascending=False).head(5)
+    # st.dataframe(profit_analysis)
 
     # Weather and Event Analysis
     st.success("Sales by Weather Condition")
@@ -94,7 +95,7 @@ if uploaded_file is not None:
     st.markdown(explanation)
 
     # Stock Management and Inventory Turnover Analysis
-    st.success("Top 5 Products by Stock After Sale")
+    st.success("Top 5 Products by their Current Stock")
     stock_data = data.groupby('Product Name')['Stock After Sale'].mean().reset_index()
     top_stock = stock_data.sort_values(by='Stock After Sale', ascending=False).head(5)
     st.dataframe(top_stock)
@@ -106,6 +107,74 @@ if uploaded_file is not None:
     st.success("Sales with and without Discounts")
     discount_sales = data.groupby('Discount (%)')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)')
     st.dataframe(discount_sales)
+
+    # Prepare data in one-hot encoded format for product combinations
+    # Pivot the data to create a basket format (Transaction ID as rows, Products as columns)
+    basket = data.groupby(['Transaction ID', 'Product Name']).size().unstack().fillna(0)
+
+    # Convert values greater than 0 to 1 (binary format)
+    product_basket = basket.applymap(lambda x: 1 if x > 0 else 0)
+
+    # Run apriori algorithm with a lower min_support to capture more item combinations
+    frequent_items = apriori(product_basket, min_support=0.005, use_colnames=True)
+
+    # Generate association rules with lift metric
+    rules = association_rules(frequent_items, metric="lift", min_threshold=1)
+
+    # Display only rules with two or more items in the antecedents or consequents
+    filtered_rules = rules[(rules['antecedents'].apply(len) >= 1) | (rules['consequents'].apply(len) >= 1)]
+
+   # Display results in Streamlit
+    st.success("Products Often Bought Together")
+
+    # Check if there are no rules and display an appropriate message
+    if filtered_rules.empty:
+        st.warning("We couldn't find any products that are frequently bought together.")
+    else:
+        # Rename columns for better understanding
+        filtered_rules.columns = [
+            'Items Purchased Together',  # Represents the products that were bought together
+            'Suggested Products',         # Represents products recommended based on past purchases
+            'Popularity (%)',             # Indicates how often this product combination was bought
+            'Likelihood (%)',             # The chance of buying the suggested products if the items purchased together are bought
+            'Strength of Association'     # A measure of how closely related the products are in terms of purchasing
+        ]
+        
+        # Display the filtered rules
+        st.dataframe(filtered_rules[['Items Purchased Together', 'Suggested Products', 'Popularity (%)', 'Likelihood (%)', 'Strength of Association']])
+
+    # Calculate Weekly and Monthly Growth as percentages
+    data['Weekly Growth (%)'] = data['Total Sales ($)'].pct_change(periods=7) 
+    data['Monthly Growth (%)'] = data['Total Sales ($)'].pct_change(periods=30) 
+
+    # Group by Product Name for high growth items, taking the mean for each product
+    high_growth_items = data.groupby('Product Name')[['Weekly Growth (%)', 'Monthly Growth (%)']].mean().reset_index()
+
+    # Display the results
+    st.success("Sales Velocity and Growth Trends")
+    st.dataframe(high_growth_items.round(2))
+
+    # Calculate Price and Quantity Changes by Product Name
+    data['Price Change (%)'] = data.groupby('Product Name')['Sales Price per Unit ($)'].pct_change() * 100
+    data['Quantity Change (%)'] = data.groupby('Product Name')['Quantity Sold'].pct_change() * 100
+
+    # Calculate Price Sensitivity Ratio (Elasticity)
+    data['Price Sensitivity Ratio'] = data['Quantity Change (%)'] / data['Price Change (%)']
+
+    # Group by Product Name and calculate the mean values for each column
+    price_sensitivity_analysis = data.groupby('Product Name')[['Price Change (%)', 'Quantity Change (%)', 'Price Sensitivity Ratio']].mean().reset_index()
+
+    # Display the Price Sensitivity Analysis
+    st.success("Price Sensitivity Analysis (Price and Demand Shifts)")
+    st.dataframe(price_sensitivity_analysis.round(2))
+
+    category_performance = data.groupby('Category').agg({
+        'Quantity Sold': 'sum',
+        'Total Sales ($)': 'sum',
+        'Profit Margin': 'mean'
+    }).sort_values('Total Sales ($)', ascending=False)
+    st.success("Category-Based Performance Analysis")
+    st.dataframe(category_performance)
 
     # Prediction Section for all data
     st.header("Predicted Weekly, Monthly Sales, and Recommended Discount Percentage")

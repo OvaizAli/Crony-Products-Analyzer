@@ -5,3 +5,4 @@ joblib
 hyperopt
 lightgbm
 xgboost
+mlxtend
