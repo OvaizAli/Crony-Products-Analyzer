@@ -243,7 +243,7 @@ if uploaded_file is not None:
             grouped_data = data.groupby('Product Name', as_index=False).agg({
                 'Current Avg Weekly Sales': 'mean',
                 'Next Week Sales': 'mean',
-                'Current Avg Monthly Sales': 'mean',
+                # 'Current Avg Monthly Sales': 'mean',
                 'Predicted Next Month Sales': 'mean',
                 'Current Avg Discount (%)': 'mean',
                 'Predicted Discount (%)': 'mean'
