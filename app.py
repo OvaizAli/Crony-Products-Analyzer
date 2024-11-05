@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import joblib
 from mlxtend.frequent_patterns import apriori, association_rules
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 # Load the models and feature names
 loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
@@ -275,3 +277,40 @@ if uploaded_file is not None:
             st.error("Error: Non-numeric data found in features. Check the output for details.")
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
+
+
+    data['Week'] = data['Date'].dt.isocalendar().week  # Adjust if using 'Month' for monthly clustering
+    weekly_sales = data.groupby(['Product Name', 'Week'])['Total Sales ($)'].sum().unstack(fill_value=0)
+
+    # Step 2: Scale the data for clustering
+    scaler = StandardScaler()
+    scaled_sales = scaler.fit_transform(weekly_sales.T).T  # Transpose for correct scaling per product
+
+    # Step 3: Perform KMeans clustering
+    n_clusters = 3
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+    weekly_sales['Cluster'] = kmeans.fit_predict(scaled_sales)
+
+    # Define descriptive names for each cluster
+    cluster_names = {
+        0: "High Demand Products",
+        1: "Seasonal Products",
+        2: "Low Demand Products"
+    }
+
+    # Map cluster numbers to names in weekly_sales DataFrame
+    weekly_sales['Cluster Name'] = weekly_sales['Cluster'].map(cluster_names)
+
+    # Step 4: Add cluster labels back to the main data
+    data = data.merge(weekly_sales[['Cluster']], on='Product Name', how='left')
+
+    # Step 5: Organize products by clusters with descriptive names
+    clustered_products = {
+        cluster_names[i]: list(weekly_sales[weekly_sales['Cluster'] == i].index)
+        for i in range(n_clusters)
+    }
+    clustered_products_df = pd.DataFrame(dict([(k, pd.Series(v)) for k, v in clustered_products.items()]))
+
+    # Display the DataFrame with products grouped by descriptive cluster names
+    st.success("Product Segmentation Based on Sales Patterns")
+    st.dataframe(clustered_products_df)
