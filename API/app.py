@@ -3,10 +3,14 @@ from pydantic import BaseModel
 import pandas as pd
 import joblib
 from typing import List, Dict
-import io
+import math
+import logging
 
 # Initialize FastAPI app
 app = FastAPI()
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
 
 # Load models and feature names
 loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
@@ -19,18 +23,26 @@ class PredictionResponse(BaseModel):
     predictions_df: List[Dict[str, str]]  # List of dictionaries, each containing string fields for product name
 
     class Config:
-        # Ensure that all string fields are treated as strings
         anystr_strip_whitespace = True
 
+# Helper function to sanitize predictions
+def sanitize_predictions(predictions):
+    """Sanitize predictions to avoid out-of-range or NaN values."""
+    return [0 if math.isnan(pred) or math.isinf(pred) else round(pred) for pred in predictions]
+
+# Preprocess data function
 def preprocess_data(data: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     # Perform necessary data preprocessing
-    data['Date'] = pd.to_datetime(data['Date'])
+    data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
+    if data['Date'].isna().any():
+        raise HTTPException(status_code=400, detail="Invalid date found in data")
+
     data['Day of Week'] = data['Date'].dt.dayofweek
     data['Week'] = data['Date'].dt.isocalendar().week
     data['Is Weekend'] = data['Day of Week'].apply(lambda x: 1 if x >= 5 else 0)
     data['Weather Condition Encoded'] = pd.factorize(data['Weather Condition'])[0]
     data['Is Holiday Encoded'] = data['Is Holiday'].apply(lambda x: 1 if x == 'Yes' else 0)
-    
+
     # One-hot encode necessary features
     data = pd.get_dummies(data, columns=['Weather Condition', 'Season', 'Category', 'Product Name'], drop_first=True)
     data.fillna(0, inplace=True)  # Fill missing values
@@ -51,9 +63,9 @@ def preprocess_data(data: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         "data": data
     }
 
+# Predict function
 @app.post("/predict/", response_model=PredictionResponse)
 async def predict(file: UploadFile = File(...)):
-    # Load the uploaded CSV file into a DataFrame
     try:
         data = pd.read_csv(file.file)
     except Exception as e:
@@ -68,9 +80,14 @@ async def predict(file: UploadFile = File(...)):
 
     try:
         # Make predictions
-        predictions_weekly = loaded_model_weekly.predict(processed_data["weekly"]).round()
-        predictions_monthly = loaded_model_monthly.predict(processed_data["monthly"]).round()
-        predictions_discount = loaded_model_discount.predict(processed_data["discount"]).round()
+        predictions_weekly = loaded_model_weekly.predict(processed_data["weekly"])
+        predictions_monthly = loaded_model_monthly.predict(processed_data["monthly"])
+        predictions_discount = loaded_model_discount.predict(processed_data["discount"])
+
+        # Sanitize predictions to avoid NaN or Inf values
+        predictions_weekly = sanitize_predictions(predictions_weekly)
+        predictions_monthly = sanitize_predictions(predictions_monthly)
+        predictions_discount = sanitize_predictions(predictions_discount)
 
         # Add predictions to the data
         processed_data["data"]['Predicted Next Week Sales'] = predictions_weekly
@@ -91,13 +108,77 @@ async def predict(file: UploadFile = File(...)):
 
                 # Append the relevant data (product name and its predictions)
                 result.append({
-                    "Product Name": product_name,  # Product name as string
-                    "Predicted Next Week Sales": str(row["Predicted Next Week Sales"]),
-                    "Predicted Next Month Sales": str(row["Predicted Next Month Sales"]),
-                    "Predicted Discount (%)": str(row["Predicted Discount (%)"])
+                    "Product Name": product_name,
+                    "Predicted Next Week Sales": sanitize_predictions([row["Predicted Next Week Sales"]])[0],
+                    "Predicted Next Month Sales": sanitize_predictions([row["Predicted Next Month Sales"]])[0],
+                    "Predicted Discount (%)": sanitize_predictions([row["Predicted Discount (%)"]])[0]
                 })
 
-        return {"predictions_df": result}
-    
+        # Group the results by product name and calculate the average prediction for each
+        grouped_result = pd.DataFrame(result)
+        grouped_result = grouped_result.groupby('Product Name').agg({
+            'Predicted Next Week Sales': 'mean',
+            'Predicted Next Month Sales': 'mean',
+            'Predicted Discount (%)': 'mean'
+        }).reset_index()
+
+        # Round and convert to integers
+        grouped_result['Predicted Next Week Sales'] = grouped_result['Predicted Next Week Sales'].round().astype(int)
+        grouped_result['Predicted Next Month Sales'] = grouped_result['Predicted Next Month Sales'].round().astype(int)
+        grouped_result['Predicted Discount (%)'] = grouped_result['Predicted Discount (%)'].round().astype(int)
+
+        # Convert the result to a list of dictionaries for the response
+        result_dict = grouped_result.to_dict(orient='records')
+
+        return {"predictions_df": result_dict}
+
     except Exception as e:
+        logging.error(f"Prediction failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Prediction failed due to an error")
+
+# Data Analysis Endpoint
+@app.post("/data-analysis/")
+async def data_analysis(file: UploadFile = File(...)):
+    try:
+        data = pd.read_csv(file.file)
+    except Exception as e:
+        logging.error(f"File reading failed: {str(e)}")
+        raise HTTPException(status_code=400, detail="Invalid file format")
+
+    # Check for required columns
+    required_columns = ['Date', 'Total Sales ($)', 'Product Name', 'Weather Condition', 'Is Holiday', 'Season', 'Category']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise HTTPException(status_code=400, detail=f"Missing required columns: {', '.join(missing_columns)}")
+
+    # Ensure 'Date' column is in datetime format and handle any errors
+    data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
+
+    # Drop rows where 'Date' could not be converted
+    data = data.dropna(subset=['Date'])
+
+    # Perform simple analysis (e.g., category breakdowns)
+    data.fillna(0, inplace=True)
+
+    # Example analysis: Sales by product category
+    category_sales = data.groupby('Category')['Total Sales ($)'].sum().reset_index()
+
+    # Example analysis: Sales by weather condition
+    weather_sales = data.groupby('Weather Condition')['Total Sales ($)'].sum().reset_index()
+
+    # Example analysis: Sales trend over time (e.g., monthly total sales)
+    monthly_sales = data.groupby(data['Date'].dt.to_period('M'))['Total Sales ($)'].sum().reset_index(name="Monthly Sales")
+    monthly_sales['Date'] = monthly_sales['Date'].astype(str)  # Convert to string for cleaner response
+
+    # Example analysis: Average sales by product
+    avg_product_sales = data.groupby('Product Name')['Total Sales ($)'].mean().reset_index(name="Average Sales")
+
+    # Return the analysis results
+    analysis_result = {
+        "category_sales": category_sales.to_dict(orient='records'),
+        "weather_sales": weather_sales.to_dict(orient='records'),
+        "monthly_sales": monthly_sales.to_dict(orient='records'),
+        "avg_product_sales": avg_product_sales.to_dict(orient='records')
+    }
+
+    return analysis_result
