@@ -38,20 +38,26 @@ if uploaded_file is not None:
     st.dataframe(sales_by_day_of_week[['Day of Week', 'Total Sales ($)']])
 
     # Weekly Analysis
-    st.success("Total Sales by Week")
+    st.success("Total Sales by Week of Month")
+    # Add columns for year, month, and week_of_month
+    data['Year'] = data['Date'].dt.year
+    data['Month'] = data['Date'].dt.month
     data['Week'] = data['Date'].dt.isocalendar().week
-    sales_by_week = data.groupby('Week')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
-    st.dataframe(sales_by_week[['Week', 'Total Sales ($)']])
 
-    # # Sales Performance by Category/Product
-    # st.success("Total Sales by Product Category")
-    # category_sales = data.groupby('Category')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False).reset_index()
-    # st.dataframe(category_sales[['Category', 'Total Sales ($)']])
-    
-    # st.success("Top 5 Products by Sales")
-    # product_sales = data.groupby('Product Name')['Total Sales ($)'].sum().reset_index()
-    # top_products = product_sales.sort_values(by='Total Sales ($)', ascending=False).head(5)
-    # st.dataframe(top_products)
+    # Add column for Week_of_Month
+    data['Week_of_Month'] = ((data['Date'].dt.day - 1) // 7) + 1
+
+    # Only keep weeks 1 to 4 (for each month)
+    data = data[data['Week_of_Month'] <= 4]
+
+    # Group by Week_of_Month to get total sales for each week of the month
+    sales_by_week_of_month = data.groupby('Week_of_Month')['Total Sales ($)'].sum().reset_index()
+
+    # Sort the sales by total sales in descending order
+    sales_by_week_of_month = sales_by_week_of_month.sort_values(by='Total Sales ($)', ascending=False)
+
+    # Display the dataframe with total sales by week of the month
+    st.dataframe(sales_by_week_of_month)
     
     # # Profitability Analysis
     # st.success("Profitability Analysis")
@@ -64,6 +70,18 @@ if uploaded_file is not None:
     st.success("Sales by Weather Condition")
     weather_sales = data.groupby('Weather Condition')['Total Sales ($)'].sum().reset_index().sort_values(by='Total Sales ($)', ascending=False)
     st.dataframe(weather_sales)
+
+    st.success("Weather Condition and Temperature Analysis on Sales")
+
+    # Define temperature bins for analysis
+    data['Temperature Bin'] = pd.cut(data['Temperature (°C)'], bins=[-10, 10, 20, 30, 40], labels=['Cold', 'Mild', 'Warm', 'Hot'])
+
+    # Group sales by Weather Condition and Temperature Bin
+    weather_temp_sales = data.groupby(['Weather Condition', 'Temperature Bin'])['Total Sales ($)'].sum().unstack(fill_value=0)
+
+    # Display sales distribution across weather conditions and temperature ranges
+    st.dataframe(weather_temp_sales)
+
     
     st.success("Sales on Holidays vs Regular Days")
     holiday_sales = data.groupby('Is Holiday')['Total Sales ($)'].sum().reset_index()
@@ -96,14 +114,50 @@ if uploaded_file is not None:
 
     st.markdown(explanation)
 
+    st.success("Seasonal Demand Forecasting by Category")
+
+    # Aggregate data by Category and Season, calculating total sales for each
+    seasonal_sales = data.groupby(['Category', 'Season'])['Total Sales ($)'].sum().unstack(fill_value=0)
+
+    # Calculate percentage change season-over-season for each category
+    seasonal_sales_change = seasonal_sales.pct_change(axis=1) * 100
+    seasonal_sales_change = seasonal_sales_change.round(2)
+
+    # Display seasonal sales trends and growth percentage
+    st.dataframe(seasonal_sales)
+    st.success("Percentage change season-over-season for each category")
+    st.dataframe(seasonal_sales_change)
+
+    st.success("Product Return Rate Analysis (Top 5)")
+
+    # Calculate the return rate as a percentage of items sold
+    data['Return Rate (%)'] = (data['Returned'] / data['Quantity Sold']) * 100
+    return_analysis = data.groupby('Product Name')['Return Rate (%)'].mean().reset_index()
+    return_analysis = return_analysis.sort_values(by='Return Rate (%)', ascending=False).head(5)
+
+    # Display top products with highest return rates
+    st.dataframe(return_analysis)
+
+
     # Stock Management and Inventory Turnover Analysis
     st.success("Top 5 Products by their Current Stock")
-    stock_data = data.groupby('Product Name')['Stock After Sale'].mean().reset_index()
-    top_stock = stock_data.sort_values(by='Stock After Sale', ascending=False).head(5)
+
+    # Rename 'Stock After Sale' to 'Current Stock'
+    data.rename(columns={'Stock After Sale': 'Current Stock'}, inplace=True)
+    stock_data = data.groupby('Product Name')['Current Stock'].mean().reset_index()
+    top_stock = stock_data.sort_values(by='Current Stock', ascending=False).head(5)
     st.dataframe(top_stock)
     
-    inventory_turnover = (data['Total Sales ($)'] / data['Stock After Sale']).mean()
-    st.success(f"Inventory Turnover Rate (Total Sales / Average Stock After Sale) = {inventory_turnover:.2f}")
+    st.success("Monthly Inventory Turnover Rate Analysis")
+
+    # Calculate monthly average stock and turnover
+    monthly_stock_turnover = data.groupby('Month').apply(
+        lambda x: (x['Total Sales ($)'].sum() / x['Current Stock'].mean()).round(2)
+    ).reset_index(name='Inventory Turnover Rate')
+
+    # Display monthly turnover rates
+    st.dataframe(monthly_stock_turnover)
+
 
     # Discount and Promotion Impact
     st.success("Sales with and without Discounts")
@@ -191,6 +245,32 @@ if uploaded_file is not None:
     st.success("Price Sensitivity Analysis (Price and Demand Shifts)")
     st.dataframe(price_sensitivity_analysis.round(2))
 
+    st.success("Promotion Strategy Analysis Using Price Elasticity and Profitability")
+
+    # Filter products with high price sensitivity (elasticity) and high profitability
+    high_elasticity_profitable = price_sensitivity_analysis[
+        (price_sensitivity_analysis['Price Sensitivity Ratio'] > 1) &
+        (price_sensitivity_analysis['Price Change (%)'] < 0)
+    ]
+
+    # Check the results before merging
+    if high_elasticity_profitable.empty:
+        st.warning("No products meet the high price sensitivity and discount criteria.")
+    else:
+        st.write("Filtered products before merge:", high_elasticity_profitable)
+
+        # Proceed with the merge operation if filtered results are not empty
+        high_elasticity_profitable = high_elasticity_profitable.merge(
+            data[['Product Name', 'Profit Margin']], on='Product Name', how='inner'
+        ).drop_duplicates()
+        
+        if high_elasticity_profitable.empty:
+            st.warning("No products found after merging with profit margin data.")
+        else:
+            # Sort by Profit Margin and display top 10
+            high_elasticity_profitable = high_elasticity_profitable.sort_values(by='Profit Margin', ascending=False).head(10)
+            st.dataframe(high_elasticity_profitable)
+
     category_performance = data.groupby('Category').agg({
         'Quantity Sold': 'sum',
         'Total Sales ($)': 'sum',
@@ -208,6 +288,13 @@ if uploaded_file is not None:
     # One-hot encoding for categorical features
     new_data = pd.get_dummies(new_data, columns=['Weather Condition', 'Season', 'Category', 'Product Name'], drop_first=True)
 
+    # Identify the categorical columns in your DataFrame
+    categorical_cols = new_data.select_dtypes(include='category').columns
+
+    # Add `0` as a category to all categorical columns
+    for col in categorical_cols:
+        new_data[col] = new_data[col].cat.add_categories([0])
+        
     # Handle missing values to avoid prediction errors
     new_data.fillna(0, inplace=True)
 
@@ -241,8 +328,6 @@ if uploaded_file is not None:
             data['Current Avg Monthly Sales'] = data.groupby('Product Name')['Monthly Sales'].transform('mean').round()
             data['Current Avg Discount (%)'] = data.groupby('Product Name')['Discount (%)'].transform('mean').round()
 
-            # Rename 'Stock After Sale' to 'Current Stock'
-            data.rename(columns={'Stock After Sale': 'Current Stock'}, inplace=True)
 
             # Group the data by product and calculate the average predicted sales and previous average sales
             grouped_data = data.groupby('Product Name', as_index=False).agg({
