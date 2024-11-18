@@ -9,14 +9,14 @@ import logging
 # Initialize FastAPI app
 app = FastAPI()
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
-
 # Load models and feature names
-loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
-loaded_model_monthly = joblib.load('final_model_monthly_sales.joblib')
-loaded_model_discount = joblib.load('final_model_discount_percentage.joblib')
-loaded_feature_names = joblib.load('feature_names.joblib')
+try:
+    loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
+    loaded_model_monthly = joblib.load('final_model_monthly_sales.joblib')
+    loaded_model_discount = joblib.load('final_model_discount_percentage.joblib')
+    loaded_feature_names = joblib.load('feature_names.joblib')
+except Exception as e:
+    raise HTTPException(status_code=500, detail="Error loading models or feature names")
 
 # Define the response model for prediction
 class PredictionResponse(BaseModel):
@@ -92,7 +92,7 @@ async def predict(file: UploadFile = File(...)):
         # Add predictions to the data
         processed_data["data"]['Predicted Next Week Sales'] = predictions_weekly
         processed_data["data"]['Predicted Next Month Sales'] = predictions_monthly
-        processed_data["data"]['Predicted Discount (%)'] = predictions_discount
+        processed_data["data"]['Suggested Discount (%)'] = predictions_discount
 
         # Initialize a list to hold the results
         result = []
@@ -111,7 +111,7 @@ async def predict(file: UploadFile = File(...)):
                     "Product Name": product_name,
                     "Predicted Next Week Sales": sanitize_predictions([row["Predicted Next Week Sales"]])[0],
                     "Predicted Next Month Sales": sanitize_predictions([row["Predicted Next Month Sales"]])[0],
-                    "Predicted Discount (%)": sanitize_predictions([row["Predicted Discount (%)"]])[0]
+                    "Suggested Discount (%)": sanitize_predictions([row["Suggested Discount (%)"]])[0]
                 })
 
         # Group the results by product name and calculate the average prediction for each
@@ -119,13 +119,13 @@ async def predict(file: UploadFile = File(...)):
         grouped_result = grouped_result.groupby('Product Name').agg({
             'Predicted Next Week Sales': 'mean',
             'Predicted Next Month Sales': 'mean',
-            'Predicted Discount (%)': 'mean'
+            'Suggested Discount (%)': 'mean'
         }).reset_index()
 
         # Round and convert to integers
         grouped_result['Predicted Next Week Sales'] = grouped_result['Predicted Next Week Sales'].round().astype(int)
         grouped_result['Predicted Next Month Sales'] = grouped_result['Predicted Next Month Sales'].round().astype(int)
-        grouped_result['Predicted Discount (%)'] = grouped_result['Predicted Discount (%)'].round().astype(int)
+        grouped_result['Suggested Discount (%)'] = grouped_result['Suggested Discount (%)'].round().astype(int)
 
         # Convert the result to a list of dictionaries for the response
         result_dict = grouped_result.to_dict(orient='records')
@@ -157,28 +157,118 @@ async def data_analysis(file: UploadFile = File(...)):
     # Drop rows where 'Date' could not be converted
     data = data.dropna(subset=['Date'])
 
-    # Perform simple analysis (e.g., category breakdowns)
+    # Fill missing values (in case there are any other NaNs in columns)
     data.fillna(0, inplace=True)
 
-    # Example analysis: Sales by product category
-    category_sales = data.groupby('Category')['Total Sales ($)'].sum().reset_index()
+    # Perform the analyses
 
-    # Example analysis: Sales by weather condition
-    weather_sales = data.groupby('Weather Condition')['Total Sales ($)'].sum().reset_index()
+    # 1. Correlation Analysis
+    def generate_correlation_summary(correlation_matrix):
+        correlation_summary = ""
+        for col1 in correlation_matrix.columns:
+            for col2 in correlation_matrix.columns:
+                if col1 != col2:
+                    correlation_value = correlation_matrix.loc[col1, col2]
+                    if abs(correlation_value) > 0.7:
+                        correlation_summary += f"Strong correlation between {col1} and {col2}: {correlation_value:.2f}\n"
+                    elif abs(correlation_value) > 0.5:
+                        correlation_summary += f"Moderate correlation between {col1} and {col2}: {correlation_value:.2f}\n"
+                    elif abs(correlation_value) > 0.3:
+                        correlation_summary += f"Weak correlation between {col1} and {col2}: {correlation_value:.2f}\n"
+        return correlation_summary
 
-    # Example analysis: Sales trend over time (e.g., monthly total sales)
-    monthly_sales = data.groupby(data['Date'].dt.to_period('M'))['Total Sales ($)'].sum().reset_index(name="Monthly Sales")
-    monthly_sales['Date'] = monthly_sales['Date'].astype(str)  # Convert to string for cleaner response
+    numeric_data = data.select_dtypes(include=['number'])  # Select only numeric columns
+    if not numeric_data.empty:
+        correlation_summary = generate_correlation_summary(numeric_data.corr())
+    else:
+        correlation_summary = "No numeric data available for correlation analysis."
+    
+    # 2. Sales by Product Category (Total Sales and Average Sales)
+    category_sales = data.groupby('Category').agg(
+        Total_Sales=('Total Sales ($)', 'sum'),
+        Average_Sales=('Total Sales ($)', 'mean')
+    ).reset_index()
 
-    # Example analysis: Average sales by product
-    avg_product_sales = data.groupby('Product Name')['Total Sales ($)'].mean().reset_index(name="Average Sales")
+    # Round values to 2 decimal places
+    category_sales['Total_Sales'] = category_sales['Total_Sales'].round(2)
+    category_sales['Average_Sales'] = category_sales['Average_Sales'].round(2)
+
+    # 3. Sales by Weather Condition (Total Sales and Average Sales)
+    weather_sales = data.groupby('Weather Condition').agg(
+        Total_Sales=('Total Sales ($)', 'sum'),
+        Average_Sales=('Total Sales ($)', 'mean')
+    ).reset_index()
+
+    # Round values to 2 decimal places
+    weather_sales['Total_Sales'] = weather_sales['Total_Sales'].round(2)
+    weather_sales['Average_Sales'] = weather_sales['Average_Sales'].round(2)
+
+    # 4. Monthly Sales Trend (Total Sales per Month)
+    # Extracting month name only, no year
+    data['Month'] = data['Date'].dt.month_name()  # Month name (e.g., January, February)
+    data['Year'] = data['Date'].dt.year  # Extract the year to group by it as well
+    
+    # Grouping by both Year and Month, and then calculating total sales
+    monthly_sales_per_year = data.groupby(['Year', 'Month'])['Total Sales ($)'].sum().reset_index(name="Total Monthly Sales")
+    
+    # Calculate the average monthly sales across all years for each month
+    monthly_avg_sales_over_year = monthly_sales_per_year.groupby('Month')['Total Monthly Sales'].mean().reset_index(name="Average Monthly Sales")
+    
+    # Calculate the total sales across all years for each month
+    monthly_total_sales = monthly_sales_per_year.groupby('Month')['Total Monthly Sales'].sum().reset_index(name="Total Sales ($)")
+    
+    # Merge the total and average sales by Month
+    monthly_sales_over_year = pd.merge(monthly_avg_sales_over_year, monthly_total_sales, on='Month')
+
+    # Round values to 2 decimal places
+    monthly_sales_over_year['Average Monthly Sales'] = monthly_sales_over_year['Average Monthly Sales'].round(2)
+    monthly_sales_over_year['Total Sales ($)'] = monthly_sales_over_year['Total Sales ($)'].round(2)
+
+    # Sort months in calendar order
+    month_order = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+    monthly_sales_over_year['Month'] = pd.Categorical(monthly_sales_over_year['Month'], categories=month_order, ordered=True)
+    monthly_sales_over_year = monthly_sales_over_year.sort_values('Month')  # Sort by month
+
+    # 5. Product Sales (Total and Average Sales by Product)
+    product_sales = data.groupby('Product Name').agg(
+        Total_Sales=('Total Sales ($)', 'sum'),
+        Average_Sales=('Total Sales ($)', 'mean')
+    ).reset_index()
+
+    # Round values to 2 decimal places
+    product_sales['Total_Sales'] = product_sales['Total_Sales'].round(2)
+    product_sales['Average_Sales'] = product_sales['Average_Sales'].round(2)
+
+    # 6. Sales by Season (Total Sales and Average Sales by Season)
+    season_sales = data.groupby('Season').agg(
+        Total_Sales=('Total Sales ($)', 'sum'),
+        Average_Sales=('Total Sales ($)', 'mean')
+    ).reset_index()
+
+    # Round values to 2 decimal places
+    season_sales['Total_Sales'] = season_sales['Total_Sales'].round(2)
+    season_sales['Average_Sales'] = season_sales['Average_Sales'].round(2)
+
+    # 7. Sales by Day of Week (Total Sales and Average Sales by Day of Week)
+    data['Day of Week'] = data['Date'].dt.day_name()  # Extracting the day of the week
+    day_of_week_sales = data.groupby('Day of Week').agg(
+        Total_Sales=('Total Sales ($)', 'sum'),
+        Average_Sales=('Total Sales ($)', 'mean')
+    ).reset_index()
+
+    # Round values to 2 decimal places
+    day_of_week_sales['Total_Sales'] = day_of_week_sales['Total_Sales'].round(2)
+    day_of_week_sales['Average_Sales'] = day_of_week_sales['Average_Sales'].round(2)
 
     # Return the analysis results
     analysis_result = {
+        "correlation_summary": correlation_summary,  # Updated to return the correlation summary
         "category_sales": category_sales.to_dict(orient='records'),
         "weather_sales": weather_sales.to_dict(orient='records'),
-        "monthly_sales": monthly_sales.to_dict(orient='records'),
-        "avg_product_sales": avg_product_sales.to_dict(orient='records')
+        "monthly_sales_over_year": monthly_sales_over_year.to_dict(orient='records'),  # Updated to include total and average sales
+        "product_sales": product_sales.to_dict(orient='records'),  # Combined Total and Average Sales for Products
+        "season_sales": season_sales.to_dict(orient='records'),
+        "day_of_week_sales": day_of_week_sales.to_dict(orient='records')
     }
 
     return analysis_result
