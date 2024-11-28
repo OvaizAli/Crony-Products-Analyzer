@@ -6,5 +6,5 @@ hyperopt
 lightgbm
 xgboost
 mlxtend
-openai
+openai==0.28
 dotenv
