@@ -181,7 +181,7 @@ if uploaded_file is not None:
 
     # Display only rules with two or more items in the antecedents or consequents
     filtered_rules = rules[(rules['antecedents'].apply(len) > 1) | (rules['consequents'].apply(len) > 1)]
-
+    
     # Display results in Streamlit
     st.success("Products Often Bought Together")
 
@@ -190,7 +190,8 @@ if uploaded_file is not None:
         st.warning("We couldn't find any products that are frequently bought together.")
     else:
         # Convert frozenset to a string of product names for better readability
-        filtered_rules['Items Purchased Together'] = filtered_rules['antecedents'].apply(lambda x: ', '.join(x))
+        # filtered_rules['Items Purchased Together'] = filtered_rules['antecedents'].apply(lambda x: ', '.join(x))
+        filtered_rules.loc[:, 'Items Purchased Together'] = filtered_rules['antecedents'].apply(lambda x: ', '.join(x))
         filtered_rules['Suggested Products'] = filtered_rules['consequents'].apply(lambda x: ', '.join(x))
     
         # Ensure we only select the relevant columns for renaming
@@ -375,7 +376,7 @@ if uploaded_file is not None:
 
     # Step 3: Perform KMeans clustering
     n_clusters = 3
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init=10)
     weekly_sales['Cluster'] = kmeans.fit_predict(scaled_sales)
 
     # Define descriptive names for each cluster
