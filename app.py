@@ -4,14 +4,14 @@ import joblib
 import os
 import openai
 import json
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from transformers import pipeline, AutoTokenizer, AutoModelForQuestionAnswering
 
 
-load_dotenv()
+# load_dotenv()
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # OPENAI_API_TOKEN = os.getenv("OPENAI_API_TOKEN") 
