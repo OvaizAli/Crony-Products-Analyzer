@@ -6,3 +6,4 @@ hyperopt
 lightgbm
 xgboost
 mlxtend
+openai
