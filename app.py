@@ -1,9 +1,22 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import os
+import openai
+import json
+from dotenv import load_dotenv
 from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+from transformers import pipeline, AutoTokenizer, AutoModelForQuestionAnswering
+
+
+load_dotenv()
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+OPENAI_API_TOKEN = os.getenv("OPENAI_API_TOKEN") 
+
+openai.api_key = OPENAI_API_TOKEN
 
 # Load the models and feature names
 loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
@@ -100,19 +113,6 @@ if uploaded_file is not None:
     features = ['Day of Week', 'Week', 'Is Weekend', 'Weather Condition Encoded', 'Is Holiday Encoded', 'Discount (%)', 'Total Sales ($)']
     correlation_matrix = data[features].corr()
     sales_correlation = correlation_matrix[['Total Sales ($)']].sort_values(by='Total Sales ($)', ascending=False)
-
-    explanation = ""
-    for feature in sales_correlation.index:
-        if feature != 'Total Sales ($)':
-            correlation_value = sales_correlation.loc[feature, 'Total Sales ($)']
-            if correlation_value > 0:
-                explanation += (f"- **{feature}** has a **positive** correlation of {correlation_value:.2f} with total sales.\n")
-            elif correlation_value < 0:
-                explanation += (f"- **{feature}** has a **negative** correlation of {correlation_value:.2f} with total sales.\n")
-            else:
-                explanation += (f"- **{feature}** has a **neutral** correlation with total sales.\n")
-
-    st.markdown(explanation)
 
     st.success("Seasonal Demand Forecasting by Category")
 
@@ -402,3 +402,138 @@ if uploaded_file is not None:
     # Display the DataFrame with products grouped by descriptive cluster names
     st.success("Product Segmentation Based on Sales Patterns")
     st.dataframe(clustered_products_df)
+
+    results = {
+    "sales_by_day_of_week": data.groupby('Day of Week')['Total Sales ($)'].sum(),
+    "profit_analysis": data.groupby('Product Name')['Profit Margin'].mean(),
+    "weather_sales": data.groupby('Weather Condition')['Total Sales ($)'].sum(),
+    "correlation_matrix": correlation_matrix,
+    "seasonal_sales": seasonal_sales,
+    "return_analysis": return_analysis,
+    "monthly_stock_turnover": monthly_stock_turnover,
+    "association_rules": rules,
+    "predicted_data": data[['Product Name', 'Next Week Sales', 'Predicted Next Month Sales', 'Predicted Discount (%)']],
+    "clustered_data": weekly_sales
+    }
+
+    # Function to generate analysis report using LLM
+    def generate_sales_report(results):
+        # Construct the enhanced prompt using the results data
+        prompt = f"""
+        You are an expert retail sales analyst. Based on the provided data, generate a **comprehensive performance analysis report** that includes detailed insights, specific details or calculations, observations, and actionable recommendations. Here's the data:
+
+        1. **Sales by Day of Week**:
+        Analyze how sales vary by day of the week. Identify peak and low sales days, and assess the performance of weekdays versus weekends.
+        {results['sales_by_day_of_week'].to_string()}
+
+        2. **Profit Analysis by Product**:
+        Evaluate the profitability of products. Highlight products with high-profit margins and those with low margins requiring optimization.
+        {results['profit_analysis'].to_string()}
+
+        3. **Total Sales by Weather Condition**:
+        Examine the impact of weather conditions on sales performance. Identify which weather conditions drive higher sales and recommend strategies for weather-driven promotions.
+        {results['weather_sales'].to_string()}
+
+        4. **Correlation Analysis**:
+        Interpret the correlation between key factors (e.g., discounts, sales volume, weather, holidays). Highlight significant positive or negative relationships and explain their implications.
+        {results['correlation_matrix']}
+
+        5. **Seasonal Sales Performance**:
+        Analyze the performance of different product categories across seasons. Identify seasonal trends, and suggest strategies to capitalize on peak seasons or improve off-season sales.
+        {results['seasonal_sales']}
+
+        6. **Top 5 Products by Return Rate**:
+        Investigate products with the highest return rates. Highlight potential reasons (e.g., quality issues, mismatch with customer expectations) and recommend corrective actions.
+        {results['return_analysis']}
+
+        7. **Monthly Sales Turnover**:
+        Assess monthly sales turnover ratios. Identify months with strong or weak performance and propose inventory strategies to optimize stock management.
+        {results['monthly_stock_turnover']}
+
+        8. **Association Rules (Product Pairing Insights)**:
+        Identify frequent product pairings and their lift metrics. Provide insights on how these pairings can be leveraged for cross-selling or bundling strategies.
+        {results['association_rules']}
+
+        9. **Predicted Next Week Sales & Discounts**:
+        Analyze predicted sales for the next week and next month along with suggested discount percentages. Assess how these predictions align with past trends and suggest strategies to maximize profitability.
+        {results['predicted_data'].to_string()}
+
+        10. **Sales Clusters (Product Week-wise Sales)**:
+        Analyze clusters of products based on weekly sales patterns. Identify characteristics of high-performing clusters and underperforming ones, and recommend tailored strategies for each.
+
+        Based on the above data, provide the following in your analysis:
+        1. **Store Performance Rating**: Rate overall sales performance as excellent, good, average, or poor, with a justification for your rating.
+        2. **Key Insights**: Highlight the top 5 most notable insights or observations from the analysis.
+        3. **Actionable Recommendations**: Provide 5 detailed, specific recommendations to improve or sustain sales performance.
+        4. **Challenges**: Identify any challenges or bottlenecks observed in the data and suggest ways to address them.
+
+        Format your response in structured JSON as follows:
+        {{
+            "store_performance_rating": "string",
+            "key_insights": ["string", "string", "string", "string", "string"],
+            "recommendations": ["string", "string", "string", "string", "string"],
+            "challenges": ["string", "string"]
+        }}
+        """
+
+        try:
+            # Generate a completion using the LLM (replace with actual model)
+            response = openai.ChatCompletion.create(
+                model="gpt-4o-mini",  # Replace with the correct model
+                messages=[{"role": "system", "content": "You are a helpful assistant for analyzing retail sales performance."},
+                        {"role": "user", "content": prompt}],
+                max_tokens=800,
+                temperature=0.7
+            )
+
+            # Extract response text
+            response_text = response.choices[0].message['content'].strip()
+
+            # Clean up the response text to handle potential formatting issues
+            cleaned_response = response_text.strip().strip('```json').strip('```')
+
+            # Attempt to parse the cleaned response as JSON
+            try:
+                # Parse the cleaned response as JSON
+                report_data = json.loads(cleaned_response)
+                
+                # Return the raw JSON (no DataFrame conversion)
+                return report_data
+            except json.JSONDecodeError as e:
+                print(f"Error: Response is not valid JSON - {cleaned_response}, Error: {e}")
+                # Return a default error message in case of invalid JSON
+                return {
+                    "store_performance_rating": "unknown",
+                    "key_insights": ["Error occurred while processing data"],
+                    "recommendations": [],
+                    "challenges": ["Unable to analyze due to processing error."]
+                }
+
+        except Exception as e:
+            print(f"Error processing results: {e}")
+            # Return a default error message in case of failure
+            return {
+                "store_performance_rating": "unknown",
+                "key_insights": ["Error occurred while processing data"],
+                "recommendations": [],
+                "challenges": ["Unable to analyze due to processing error."]
+            }
+
+    # Generate the report and display it
+    report = generate_sales_report(results)
+
+    # Print or display the report in Streamlit
+    st.title("Sales Performance Analysis Report")
+    if report:
+        st.subheader(f"Store Performance Rating - {report['store_performance_rating'].capitalize()}")
+        st.subheader("Key Insights")
+        for insight in report['key_insights']:
+            st.write(f"- {insight}")
+        st.subheader("Actionable Recommendations")
+        for recommendation in report['recommendations']:
+            st.write(f"- {recommendation}")
+        st.subheader("Challenges")
+        for challenge in report['challenges']:
+            st.write(f"- {challenge}")
+    else:
+        st.error("Failed to generate report.")
