@@ -8,7 +8,6 @@ import json
 from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
-from transformers import pipeline, AutoTokenizer, AutoModelForQuestionAnswering
 
 
 # load_dotenv()
