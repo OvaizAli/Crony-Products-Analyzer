@@ -14,9 +14,9 @@ from transformers import pipeline, AutoTokenizer, AutoModelForQuestionAnswering
 load_dotenv()
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-OPENAI_API_TOKEN = os.getenv("OPENAI_API_TOKEN") 
-
-openai.api_key = OPENAI_API_TOKEN
+# OPENAI_API_TOKEN = os.getenv("OPENAI_API_TOKEN") 
+api_key = st.secrets["general"]["OPENAI_API_TOKEN"]
+openai.api_key = api_key
 
 # Load the models and feature names
 loaded_model_weekly = joblib.load('final_model_weekly_sales.joblib')
