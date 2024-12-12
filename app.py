@@ -4,7 +4,7 @@ import joblib
 import os
 import openai
 import json
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
@@ -418,61 +418,74 @@ if uploaded_file is not None:
 
     # Function to generate analysis report using LLM
     def generate_sales_report(results):
-        # Construct the enhanced prompt using the results data
+        # Construct the refined prompt using the results data
         prompt = f"""
-        You are an expert retail sales analyst. Based on the provided data, generate a **comprehensive performance analysis report** that includes detailed insights, specific details or calculations, observations, and actionable recommendations. Here's the data:
+        You are an expert retail sales analyst. Based on the data provided, create a **clear and easy-to-understand sales performance report** that includes insights, observations, and actionable recommendations. Here’s the data:
 
         1. **Sales by Day of Week**:
-        Analyze how sales vary by day of the week. Identify peak and low sales days, and assess the performance of weekdays versus weekends.
-        {results['sales_by_day_of_week'].to_string()}
+        Analyze the 'sales_by_day_of_week' data to identify which days perform well and which do not. Discuss the differences between weekdays and weekends, highlighting any trends or patterns, such as the percentage of total sales for weekdays versus weekends. Provide actual sales figures for the best and worst-performing days.
+        {results['sales_by_day_of_week']}
 
         2. **Profit Analysis by Product**:
-        Evaluate the profitability of products. Highlight products with high-profit margins and those with low margins requiring optimization.
-        {results['profit_analysis'].to_string()}
+        In the 'profit_analysis' data, evaluate which products (e.g., 'Outdoor Furniture', 'Luxury Watches') are making the most money and which are underperforming in terms of profit margins. Provide actual profit margin percentages for the highest and lowest performing products, and suggest potential pricing optimizations or areas for improvement.
+        {results['profit_analysis']}
 
-        3. **Total Sales by Weather Condition**:
-        Examine the impact of weather conditions on sales performance. Identify which weather conditions drive higher sales and recommend strategies for weather-driven promotions.
-        {results['weather_sales'].to_string()}
+        3. **Sales by Weather Condition**:
+        From the 'weather_sales' data, explain how different weather conditions (e.g., 'Sunny', 'Rainy', 'Snowy') impact sales. Provide total sales figures for each weather condition and discuss which weather types result in the highest and lowest sales for specific products. Highlight any significant differences in sales percentages across weather conditions.
+        {results['weather_sales']}
 
-        4. **Correlation Analysis**:
-        Interpret the correlation between key factors (e.g., discounts, sales volume, weather, holidays). Highlight significant positive or negative relationships and explain their implications.
-        {results['correlation_matrix']}
-
-        5. **Seasonal Sales Performance**:
-        Analyze the performance of different product categories across seasons. Identify seasonal trends, and suggest strategies to capitalize on peak seasons or improve off-season sales.
-        {results['seasonal_sales']}
-
-        6. **Top 5 Products by Return Rate**:
-        Investigate products with the highest return rates. Highlight potential reasons (e.g., quality issues, mismatch with customer expectations) and recommend corrective actions.
+        4. **Product Return Rates**:
+        Look at the 'product_return_rates' data to find products with high return rates, such as 'Luxury Watches' or 'Corner Bookshelves'. Provide actual return rates as percentages for these products and suggest possible reasons (e.g., quality issues, mismatch with expectations). Propose strategies to reduce these returns.
         {results['return_analysis']}
 
-        7. **Monthly Sales Turnover**:
-        Assess monthly sales turnover ratios. Identify months with strong or weak performance and propose inventory strategies to optimize stock management.
+        5. **Sales Clusters and Monthly Turnover**:
+        In the 'sales_clusters' and 'monthly_stock_turnover' data, analyze which months (e.g., 'September') have the strongest or weakest sales performance and why. Provide sales figures for top-performing months and the percentage change in sales for weaker months. Discuss strategies to address fluctuations.
+        {results['clustered_data']}
         {results['monthly_stock_turnover']}
 
-        8. **Association Rules (Product Pairing Insights)**:
-        Identify frequent product pairings and their lift metrics. Provide insights on how these pairings can be leveraged for cross-selling or bundling strategies.
+        6. **Product Pairings (Association Rules)**:
+        From the 'association_rules' data, identify which product pairings (e.g., 'Coffee Tables' with 'Collectible Figures') are commonly bought together. Provide actual figures on the frequency or percentage of sales involving these pairings. How can this information be used for cross-selling or bundling promotions to increase sales and improve customer experience?
         {results['association_rules']}
 
-        9. **Predicted Next Week Sales & Discounts**:
-        Analyze predicted sales for the next week and next month along with suggested discount percentages. Assess how these predictions align with past trends and suggest strategies to maximize profitability.
-        {results['predicted_data'].to_string()}
+        7. **Predicted Data for Future Trends**:
+        Analyze the 'predicted_data' for next week's sales and predicted discount percentages. Include actual predicted sales figures for the coming week and the predicted discount percentage. How can these predictions be used for adjusting inventory, promotions, or marketing strategies in the upcoming period?
+        {results['predicted_data']}
 
-        10. **Sales Clusters (Product Week-wise Sales)**:
-        Analyze clusters of products based on weekly sales patterns. Identify characteristics of high-performing clusters and underperforming ones, and recommend tailored strategies for each.
+        8. **Correlation Insights**:
+        Review the 'correlation_matrix' to identify any strong relationships between different factors, such as sales and weather conditions, or profit margins and return rates. Highlight specific correlation values (e.g., 0.85 between weather and sales for 'Sunny' days). How can these relationships inform better decision-making?
+        {results['correlation_matrix']}
 
-        Based on the above data, provide the following in your analysis:
-        1. **Store Performance Rating**: Rate overall sales performance as excellent, good, average, or poor, with a justification for your rating.
-        2. **Key Insights**: Highlight the top 5 most notable insights or observations from the analysis.
-        3. **Actionable Recommendations**: Provide 5 detailed, specific recommendations to improve or sustain sales performance.
-        4. **Challenges**: Identify any challenges or bottlenecks observed in the data and suggest ways to address them.
+        9. **Seasonal Sales Trends**:
+        Based on the 'seasonal_sales' data, identify any significant seasonal trends in sales performance. Provide total sales for each season and the percentage increase or decrease compared to the previous year. How can these insights be used for future planning in terms of stock, marketing, and promotions?
+        {results['seasonal_sales']}
 
-        Format your response in structured JSON as follows:
+        Based on this data, please provide the following:
+
+        1. **Store Performance Rating**: Rate overall sales performance as excellent, good, average, or poor, and explain why with examples from the data like sales trends by day, profit margins, and monthly turnover trends from the relevant columns such as 'sales_by_day_of_week' and 'profit_analysis'. Provide percentages or sales figures to support the rating.
+
+        2. **Key Insights**: Highlight the 5 most important things you learned from the data:
+        - Key observations from 'sales_by_day_of_week', 'weather_sales', 'product_return_rates', 'profit_analysis', 'association_rules', 'predicted_data', and 'seasonal_sales'. Include percentages or figures where relevant.
+
+        3. **Actionable Recommendations**: Offer 5 clear and specific recommendations, based on the analysis from data columns like 'sales_by_day_of_week', 'weather_sales', 'product_return_rates', 'monthly_turnover', 'sales_clusters', 'association_rules', and 'predicted_data'. 
+        - For each recommendation, explain the basis for the suggestion using accurate facts and figures from the data and how it can be practically implemented based on the provided data.
+
+        4. **Challenges**: Point out any sales challenges the store might face which you noticed in the given data, quote specific facts and figures to support your statements.
+
+        Format your response in simple JSON like this:
         {{
             "store_performance_rating": "string",
             "key_insights": ["string", "string", "string", "string", "string"],
-            "recommendations": ["string", "string", "string", "string", "string"],
-            "challenges": ["string", "string"]
+            "recommendations": [
+                "string",
+                "string",
+                "string",
+                "string",
+                "string"
+            ],
+            "challenges": [
+                "string",
+                "string"
+            ]
         }}
         """
 
