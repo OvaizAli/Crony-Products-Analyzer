@@ -4,7 +4,7 @@ import joblib
 import os
 import openai
 import json
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
